@@ -1,6 +1,4 @@
-# gtfs2emis_paper
-
-
+[![DOI](https://zenodo.org/badge/563972827.svg)](https://zenodo.org/badge/latestdoi/563972827)
 
 R codes used in the research paper **"Estimating public transport emissions from General Transit Feed Specification data"**
 
