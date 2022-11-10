@@ -1,0 +1,9 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+submissions/*
+data/*
+data-raw/*
+ipeaGIT-gtfs2emis-a89ddd9/*
+gtfs2emis-0.0.1.zip
