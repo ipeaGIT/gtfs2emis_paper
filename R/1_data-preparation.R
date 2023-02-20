@@ -39,12 +39,21 @@ download.file(url = tile_url,destfile = "data-raw/bra_spo_maptile.rds",mode = "w
 # 2) read GTFS  ----
 
 spo_gtfs <- gtfstools::read_gtfs("data-raw/gtfs_spo_sptrans_2019-06.zip")
+spo_gtfs_oct <- gtfstools::read_gtfs("data-raw/gtfs_spo_sptrans_2019-10.zip")
+spo_gtfs_oct$`_transparencia_e-SIC_42374_email_05-09-19` <- NULL
+
 # filter by bus route
 spo_gtfs <- gtfstools::filter_by_route_type(spo_gtfs,route_type = 3)
+spo_gtfs_oct <- gtfstools::filter_by_route_type(spo_gtfs_oct,route_type = 3)
 
+# filter by weekday
+spo_gtfs <- gtfstools::filter_by_weekday(spo_gtfs,weekday = "wednesday")
+spo_gtfs_oct <- gtfstools::filter_by_weekday(spo_gtfs_oct,weekday = "wednesday")
 dir.create("data/")
+
 # save gtfs
 gtfstools::write_gtfs(spo_gtfs,"data/gtfs_spo_sptrans_prep.zip")
+gtfstools::write_gtfs(spo_gtfs_oct,"data/gtfs_spo_sptrans_prep_oct.zip")
 
 # 3) download SP boundary ----
 spo_boundary <- geobr::read_municipality(code_muni = 3550308,simplified = FALSE)

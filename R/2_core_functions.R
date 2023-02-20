@@ -21,7 +21,8 @@ library(gtfs2emis)
 
 # 1) Transport model ----
 # read gtfs
-spo_gtfs <- gtfstools::read_gtfs("data/gtfs_spo_sptrans_prep.zip")
+#spo_gtfs <- gtfstools::read_gtfs("data/gtfs_spo_sptrans_prep.zip")
+spo_gtfs <- gtfstools::read_gtfs("data/gtfs_spo_sptrans_prep_oct.zip")
 
 spo_gtfs$trips$trip_id %>% uniqueN()      # 2271
 spo_gtfs$trips$shape_id %>% uniqueN()     # 2271
@@ -33,7 +34,8 @@ spo_gtfs$trips %>% nrow() # 2271
 
 # generate gps
 
-dir.create("data/transport_model/")
+dir.create("data/transport_model/jul/")
+dir.create("data/transport_model/oct/")
 
 transport_model(gtfs_data = spo_gtfs
                 ,min_speed = 2
@@ -42,7 +44,7 @@ transport_model(gtfs_data = spo_gtfs
                 ,parallel = TRUE
                 ,ncores = 37
                 ,spatial_resolution = 100
-                ,output_path = "data/transport_model"
+                ,output_path = "data/transport_model/oct/"
                 ,continue = TRUE)
 
 
