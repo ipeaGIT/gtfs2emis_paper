@@ -1,5 +1,5 @@
 
-# Load -----
+# 1) Load -----
 rm(list=ls())
 easypackages::packages('devtools'
                        # data analysis/visualization
@@ -17,17 +17,10 @@ easypackages::packages('devtools'
 
 # import fonts
 extrafont::font_import()
-extrafont::choose_font("LM Roman 10")
-extrafont::loadfonts("LM Roman 10")
 extrafont::loadfonts(device = "win")
 extrafont::fonts()
-showtext::showtext_auto()
-showtext::showtext_opts(dpi = 300)
 
-loadfonts(device = "all")
-setwd("L://Proj_acess_oport//git_jbazzo//gtfs2emis_paper")
-
-# Prepare  OCUP data ----
+# 2) Prepare  OCUP data ----
 sp_path <- "L:/Proj_emission_routes/data-raw/passengers/bra_spo/50544_CARREGAMENTOS_LINHAS_OUT2019_POR_PTO_SENTIDO.XLSX"
 dt_raw <- readxl::read_xlsx(path = sp_path)
 setDT(dt_raw)
@@ -130,7 +123,7 @@ dir.create("data/pax/")
 readr::write_rds(dt_h_trip,"data/pax/dt_h_trip.rds",compress = "gz")
 
 
-# Read GTFS -----
+# 3) Read GTFS -----
 rm(list=ls())
 #filter dt by route_type == 3
 
@@ -152,14 +145,41 @@ gtfs_spo$trips[,uniqueN(shape_id)]
 gtfs_spo$trips[,uniqueN(route_id)]
 gtfs_spo$trips[,uniqueN(trip_id)] 
 
-
-# P Co2/cap -----
+# 4) Prep VTK per hour -----
 rm(list=ls())
+gc(reset = TRUE)
 
-main_f <- "L://Proj_acess_oport//git_jbazzo//gtfs2emis_paper//"
-sub_f <- "data//emissions//"
-gps_files <- list.files(paste0(main_f,sub_f),full.names = TRUE)
-gps_files
+# read emi_time
+
+dir.create("data/vtk_hour/")
+emi_path <- list.files("data/emissions////",full.names = TRUE)
+emi_files <- list.files("data/emissions////",full.names = F)
+emi_files[1]
+lapply(seq_along(emi_path),function(i){ # i = 1
+  emi_dt <- readr::read_rds(emi_path[i])
+  emi_dt <- emi_dt$tp_model
+  setDT(emi_dt)
+  emi_dt[,hour := data.table::hour(from_timestamp)]
+  emi_dt <- emi_dt[,list(dist = sum(dist,na.rm = TRUE)
+                         ,trip_number = uniqueN(trip_number)),by = hour]
+  readr::write_rds(x = emi_dt
+                   ,file = paste0("data/vtk_hour/",emi_files[i]))
+  return(NULL)
+})
+
+# read
+rm(list=ls())
+gc(reset = TRUE)
+emi_files <- list.files("data/vtk_hour////",full.names = T)
+emi_dt <- lapply(emi_files,readr::read_rds) %>% data.table::rbindlist()
+emi_dt <- emi_dt[,list(dist = sum(dist,na.rm = TRUE)
+                       ,total_trip = sum(trip_number,na.rm=TRUE))
+                 ,by = hour]
+readr::write_rds(x = emi_dt,"data/pax/vtk_hour.rds")
+
+# 5) Plot Co2/cap -----
+rm(list=ls())
+gc(reset = TRUE)
 
 dt_h_trip <- readr::read_rds("data/pax/dt_h_trip.rds")
 
@@ -169,42 +189,82 @@ tmp_h_trip <- copy(dt_h_trip) %>%
 
 # read emi_time
 
-main_f <- "L://Proj_acess_oport//git_jbazzo//gtfs2emis_paper//data/emi_time/"
-
-emi_files <- list.files(main_f,full.names = TRUE)
+emi_files <- list.files("data/emi_time/",full.names = TRUE)
 emi_dt <- lapply(emi_files,readr::read_rds) %>% data.table::rbindlist()
-emi_dt <- emi_dt[pollutant == "CO2",sum(emi,na.rm = TRUE),by = .(timestamp_hour)]
+emi_dt <- emi_dt[pollutant == "CO2",
+                 list("emi" = sum(emi,na.rm = TRUE))
+                 ,by = .(timestamp_hour)]
+emi_dt[1,]
+
+
+# read total dist
+dist_dt <- readr::read_rds("data/pax/vtk_hour.rds")
 
 # merge
 units::install_unit("pax")
-tmp_h_trip[emi_dt,on = c("horario" = "timestamp_hour"),emi := i.V1]
+tmp_h_trip[emi_dt,on = c("horario" = "timestamp_hour"),emi := i.emi]
+tmp_h_trip <- tmp_h_trip[dist_dt,on = c("horario" = "hour")]
 tmp_h_trip[,pax := units::set_units(V1,"pax")]
 tmp_h_trip[,emi_capita := emi/pax]
+tmp_h_trip[,veh_cap := units::set_units(total_trip * 100,"pax")]
+tmp_h_trip[,occupancy := 100 * pax / veh_cap]
+tmp_h_trip[,emi_dist := emi/dist]
+tmp_h_trip[,emi_dist_cap := emi/(dist*pax)]
+tmp_h_trip[,dist_trip := dist / total_trip]
 
 # dcast
 tmp_h_trip1 <- data.table::melt(data = tmp_h_trip,
                                 id.vars = "horario",
-                                measure.vars = c("emi","pax","emi_capita"),
+                                measure.vars = c("emi"
+                                                 ,"pax"
+                                                 ,"dist"
+                                                 ,"total_trip"
+                                                 ,"emi_capita"
+                                                 ,"veh_cap"
+                                                 ,"emi_dist"
+                                                 ,"dist_trip"
+                                                 ,"emi_dist_cap"),
                                 variable.name = "variables")
 tmp_h_trip1[1:4,]
 
 ggplot(tmp_h_trip1)+
   geom_col(aes(y = as.numeric(value),x = horario))+
-  facet_wrap(~variables,ncol = 1,scales = "free_y"
+  # scale
+  scale_x_continuous(breaks = c(seq(0,23,3),23)
+                     ,limits = c(0-1,23+1)
+                     ,expand = c(0,0))+
+  # labs
+  facet_wrap(~variables,nrow = 2,scales = "free_y"
              ,labeller =  as_labeller(c(
                `emi` = "CO2 emissions [g]",
+               `total_trip` = "Total trips",
                `pax` = "Total passenger [pax]",
-               `emi_capita`="Emission per capita [g/pax]"
+               `dist` = "Total distance [km]",
+               `veh_cap` = "Occupancy [%]",
+               `dist_trip` = "Distance per trip [km]",
+               `emi_capita`="Emission per capita [g/pax]",
+               `emi_dist`="Emission per distance [g/km]",
+               `emi_dist_cap`="Emission per distance \nper capita [g/(km * pax)]"
              )))+
-  labs(y = NULL,x = "Hour")
+  labs(y = NULL,x = "Hour")+
+  # theme
+  theme_light()+
+  theme(axis.text.x = element_text(size = 9)
+        ,text = element_text(family = "LM Roman 10")
+        ,strip.text.x = element_text(hjust = 0,vjust = 1.0
+                                     , margin=margin(l=0))
+        ,strip.background = element_blank()
+        ,strip.text = element_text(colour = 'black')
+        ,legend.position = "bottom"
+  )+
+  guides(fill = guide_legend(title.position = "top"))
 
-ggplot2::ggsave(filename = "figures/co2_per_capita.png"
-                , scale = 0.6
-                , width = 20
-                , bg = "white"
-                  , height = 25
-                , units = "cm"
-                , dpi = 300)
+ggplot2::ggsave(filename = "figures/pax/co2_per_capita.png"
+                , scale = 0.55  
+                , width = 40
+                , height = 12.5
+                , bg = "white" 
+                , units = "cm" , dpi = 300 )
 
 # P Co2/(capita * route) -----
 rm(list=ls())
@@ -272,8 +332,9 @@ ggplot2::ggsave(filename = "figures/pax/co2_per_capita_bp.png"
                 , units = "cm"
                 , dpi = 300)
 
-# P Co2/ (capita * stree link) -----
+# Plot Co2/ (capita * stree link) -----
 rm(list=ls())
+gc(reset = TRUE)
 
 # read h_trip
 dt_h_trip <- readr::read_rds("data/pax/dt_h_trip.rds")
@@ -415,7 +476,7 @@ p2 <- tmp_h_trip[as.numeric(tmp_h_trip$pax) < 2500,] %>%
 p1 / p2
 
 
-# Grid co2/pax*km ------
+# Plot co2/pax*km ------
 rm(list=ls())
 
 units::install_unit("pax")
@@ -525,11 +586,8 @@ grid_pax <- function(i){ # i = 1
 
 
 future::plan("multisession", workers = 35)
-furrr::future_map(.x = seq_along(inter_list)
-                  ,.f = grid_pax
-                  ,.options = furrr::furrr_options(
-                    packages = c('data.table',
-                                 'sf', 'units'))) 
+lapply(X = seq_along(inter_list)
+       ,FUN = grid_pax) 
 
 ## read grids ----
 rm(list=ls())
@@ -560,7 +618,7 @@ setDT(gridded_pax)
 gridded_pax <- sf::st_as_sf(gridded_pax)
 
 summary(gridded_pax$emi_pax)
-### plot-----
+### CO2 per capita spatial-----
 gridded_pax %>% 
   setDT() %>% 
   #.[as.numeric(pax) > 9,] %>% .[] %>% 
@@ -582,51 +640,6 @@ ggplot2::ggsave(filename = "figures/pax/mapa_co2_per_pax.png"
                 ,scale = 0.6,width = 14,
                 bg = "white",
                 height = 20,units = "cm",dpi = 300)
-
-### plot renda -----
-
-f_q <- function(i){
-  as.numeric(
-    cut(i
-        , breaks= quantile(x = i
-                           ,probs=seq(0, 1, by=0.25)
-                           , na.rm=T),
-        include.lowest= TRUE, labels=1:4))
-}
-
-pr <- gridded_pax %>% 
-  setDT() %>% 
-  .[,q_emi_pax := f_q(emi_pax)] %>% 
-  .[,q_emi := f_q(emi)] %>% 
-  .[,q_pax := f_q(pax)] 
-
-melt(data = pr,
-     measure.vars = c("q_emi","q_pax","q_emi_pax"),
-     id.vars = c("geometry")) %>% 
-  sf::st_as_sf() %>% 
-  ggplot()+
-  geom_sf(aes(fill = as.factor(value)), color = NA)+ 
-  facet_wrap(~variable
-             ,labeller = as_labeller(
-               c(`q_emi` = "CO2 emissions (g)",
-                 `q_pax` = "Passenger (pax)",
-                 `q_emi_pax` = "CO2 per pax (g/pax)")
-             ))+
-  scale_fill_viridis_d(
-    option = "D"
-    ,direction = -1
-    ,labels = c("1 (smaller)",2:3,"4 (greater)")
-  )  +
-  labs(fill = "Quartile ")+
-  theme_bw()+
-  theme(legend.position = "bottom")
-
-
-
-ggplot2::ggsave(filename = "figures/pax/mapa_co2_per_pax_facet.png"
-                ,scale = 0.75,width = 25,
-                bg = "white",
-                height = 15,units = "cm",dpi = 300)
 
 # Plot3  CO2 zoom ----
 rm(list=ls())
@@ -737,7 +750,6 @@ spo_gtfs <- gtfstools::read_gtfs("data/gtfs_spo_sptrans_prep.zip")
 gps_lines_sf <- gtfstools::convert_shapes_to_sf(gtfs = spo_gtfs)
 stops_sf <- gtfstools::convert_stops_to_sf(gtfs = spo_gtfs)
 
-
 intersect_lines_sf <- sf::st_intersection(
   x = sf::st_transform(gps_lines_sf,3857)
   ,y = get_bbox)
@@ -763,7 +775,7 @@ pr <- bind_grid %>%
 f_full <- function(dt_full,input,map = TRUE){
   if( input == 'q_emi'    ) mytitle <- expression(CO[2][] (g))
   if( input == 'q_pax'    ) mytitle <- expression(Passenger)
-  if( input == 'q_emi_pax') mytitle <- expression(CO[2][per][passenger](g))
+  if( input == 'q_emi_pax') mytitle <- expression(CO[2]~per~passenger(g))
   
   
   tmp_plot <- ggplot(dt_full)+
@@ -793,7 +805,7 @@ f_full <- function(dt_full,input,map = TRUE){
     geom_sf(data = my_bound
             ,color = "black"
               ,linetype = "solid",alpha = 0.5
-            , size = 0.15,fill = NA) +
+            , linewidth = 0.15,fill = NA) +
     labs(x = NULL,y = NULL,fill = NULL,title = mytitle) +
     theme(legend.position = "none"
           , axis.ticks.length = unit(0, "pt")
@@ -859,7 +871,7 @@ f_zoom <- function(dt_zoom,map = TRUE,rm_fill = TRUE){
     # add street network
     geom_sf(data = intersect_lines_sf
             ,alpha = 0.15
-            ,size = 0.25
+            ,linewidth = 0.25
             ,color = "black")+
     # limits
     coord_sf(xlim = lim_coord_zoom$X
@@ -890,7 +902,7 @@ f_zoom <- function(dt_zoom,map = TRUE,rm_fill = TRUE){
           , strip.background = element_blank()
           , strip.text.x = element_blank()
           , panel.border = element_rect(color = "black"
-                                          , fill = NA,size = 0.75))
+                                          , fill = NA,linewidth = 0.75))
   #if(rm_fill){
   #  tmp_plot  <- tmp_plot + 
   #    theme(legend.position = "none")
@@ -948,7 +960,7 @@ ggplot2::ggsave(plot = pf1
                 , scale = 0.75
                 , width = 17*1.15,
                 , bg = "white"
-                , height = 17
+                  , height = 17
                 , units = "cm"
                 , dpi = 300)
 
