@@ -21,23 +21,25 @@ library(gtfs2emis)
 
 # 1) Transport model ----
 # read gtfs
-#spo_gtfs <- gtfstools::read_gtfs("data/gtfs_spo_sptrans_prep.zip")
-spo_gtfs <- gtfstools::read_gtfs("data/gtfs_spo_sptrans_prep_oct.zip")
+spo_gtfs_jul <- gtfstools::read_gtfs("data/gtfs_spo_sptrans_prep.zip")
+spo_gtfs_oct <- gtfstools::read_gtfs("data/gtfs_spo_sptrans_prep_oct.zip")
 
-spo_gtfs$trips$trip_id %>% uniqueN()      # 2271
-spo_gtfs$trips$shape_id %>% uniqueN()     # 2271
-spo_gtfs$trips$trip_id  %>% uniqueN()     # 2271
-spo_gtfs$shapes$shape_id  %>% uniqueN()   # 2271
-spo_gtfs$stop_times$trip_id %>% uniqueN() # 2271
-spo_gtfs$trips$shape_id  %>% uniqueN()    # 2271
-spo_gtfs$trips %>% nrow() # 2271
 
 # generate gps
 
 dir.create("data/transport_model/jul/")
 dir.create("data/transport_model/oct/")
 
-transport_model(gtfs_data = spo_gtfs
+transport_model(gtfs_data = spo_gtfs_jul
+                ,min_speed = 2
+                ,max_speed = 80
+                ,new_speed = NULL
+                ,parallel = TRUE
+                ,ncores = 37
+                ,spatial_resolution = 100
+                ,output_path = "data/transport_model/jul/"
+                ,continue = TRUE)
+transport_model(gtfs_data = spo_gtfs_oct
                 ,min_speed = 2
                 ,max_speed = 80
                 ,new_speed = NULL
@@ -47,15 +49,14 @@ transport_model(gtfs_data = spo_gtfs
                 ,output_path = "data/transport_model/oct/"
                 ,continue = TRUE)
 
-
 ## general statistics ----
 
 #' number of routes
 uniqueN(spo_gtfs$routes$route_id)
 
 #' trips per day
-files_gps <- list.files("data/transport_model/",full.names = TRUE)
-files_gps_names <- list.files("data/transport_model/",full.names = FALSE)
+files_gps <- list.files("data/transport_model/jul/",full.names = TRUE)
+files_gps_names <- list.files("data/transport_model/jul/",full.names = FALSE)
 
 future::plan(strategy =  "multisession",workers = 35)
 
@@ -155,17 +156,29 @@ setnames(fleet_spo,"Technology","tech")
 setnames(fleet_spo,"year","model_year")
 setnames(fleet_spo,"type_name_eu","veh_type")
 dir.create("data/emissions/")
+dir.create("data/emissions/jul/")
+dir.create("data/emissions/oct/")
 
 future::plan(strategy =  "multisession",workers = 35)
 
-
-emission_model(tp_model = "data/transport_model"
+# july
+emission_model(tp_model = "data/transport_model/jul/"
                ,ef_model = "ef_europe_emep"
                ,pollutant = c("CO2","NOx","PM10","CH4")
                ,fleet_data = fleet_spo
                ,parallel = TRUE
                ,ncores = 35
-               ,output_path = "data/emissions"
+               ,output_path = "data/emissions/jul/"
+               ,continue = FALSE
+               ,quiet = TRUE)
+# july
+emission_model(tp_model = "data/transport_model/oct/"
+               ,ef_model = "ef_europe_emep"
+               ,pollutant = c("CO2","NOx","PM10","CH4")
+               ,fleet_data = fleet_spo
+               ,parallel = TRUE
+               ,ncores = 35
+               ,output_path = "data/emissions/oct/"
                ,continue = FALSE
                ,quiet = TRUE)
 
@@ -174,97 +187,130 @@ emission_model(tp_model = "data/transport_model"
 rm(list=ls())
 gc(reset=TRUE)
 dir.create("data/emi_time/")
+dir.create("data/emi_time/jul/")
+dir.create("data/emi_time/oct/")
 
 # list-files
-files_gps <- list.files(path = 'data/emissions/',full.names = TRUE)
-files_gps_names <- list.files(path = 'data/emissions/',full.names = FALSE)
+oct_files_gps <- list.files(path = 'data/emissions/oct/',full.names = TRUE)
+jul_files_gps <- list.files(path = 'data/emissions/jul/',full.names = TRUE)
+
+oct_files_gps_names <- list.files(path = 'data/emissions/oct/',full.names = FALSE)
+jul_files_gps_names <- list.files(path = 'data/emissions/jul/',full.names = FALSE)
 
 oplan <- future::plan(strategy =  "multisession",workers = 35)
 requiredPackages = c('data.table', 'sf', 'units')
 
-time_processing <- furrr::future_map(seq_along(files_gps),function(j){ # j = 1
-  
-  
-  # message(paste0("Emi time of file '",files_gps_names[i],"'"))
-  
-  #message(i)
-  temp_emi <- readr::read_rds(files_gps[j])
-  emi_post <- emis_summary(emi_list = temp_emi
-                           ,by = "time")
-  #emi_post <- units::drop_units(emi_post)
+
+# JULY
+time_processing <- furrr::future_map(seq_along(jul_files_gps),function(j){ # j = 1
+  temp_emi <- readr::read_rds(jul_files_gps[j])
+  emi_post <- emis_summary(emi_list = temp_emi,by = "time")
   readr::write_rds(x = emi_post
-                   ,file = paste0("data/emi_time/",files_gps_names[j])
+                   ,file = paste0("data/emi_time/jul/",jul_files_gps_names[j])
                    ,compress = 'gz')
   return(NULL)
-},.options = furrr::furrr_options(seed=TRUE
-                                  ,packages = requiredPackages))
+},.options = furrr::furrr_options(seed=TRUE,packages = requiredPackages))
+
+# OCT
+time_processing <- furrr::future_map(seq_along(oct_files_gps),function(j){ # j = 1
+  temp_emi <- readr::read_rds(oct_files_gps[j])
+  emi_post <- emis_summary(emi_list = temp_emi,by = "time")
+  readr::write_rds(x = emi_post
+                   ,file = paste0("data/emi_time/oct/",oct_files_gps_names[j])
+                   ,compress = 'gz')
+  return(NULL)
+},.options = furrr::furrr_options(seed=TRUE,packages = requiredPackages))
 
 ## b) Spatial post-processing-----
 rm(list=ls())
 gc(reset = TRUE)
 
 dir.create("data/emi_grid/")
+dir.create("data/emi_grid/jul/")
+dir.create("data/emi_grid/oct/")
 
 # list-files
-files_gps <- list.files(path = 'data/emissions/',full.names = TRUE)
-files_gps_names <- list.files(path = 'data/emissions/',full.names = FALSE)
+jul_files_gps <- list.files(path = 'data/emissions/jul/',full.names = TRUE)
+jul_files_gps_names <- list.files(path = 'data/emissions/jul/',full.names = FALSE)
 
+oct_files_gps <- list.files(path = 'data/emissions/oct/',full.names = TRUE)
+oct_files_gps_names <- list.files(path = 'data/emissions/oct/',full.names = FALSE)
+
+#
 temp_grid <- readr::read_rds("data-raw/bra_spo_grid.rds")
 temp_grid <-  sf::st_transform(temp_grid,"+proj=utm +zone=23 +ellps=WGS84 +south +units=m")
 
-spatial_f <- function(i){ # i = 2
-  #message(paste0("Emi grid of file '",files_gps_names[i],"'"))
-  
-  temp_emi <- readr::read_rds(files_gps[i])
-  
+# JULY
+jul_spatial_f <- function(i){
+  temp_emi <- readr::read_rds(jul_files_gps[i])
   #  transform
   temp_emi$tp_model <- temp_emi$tp_model %>% 
     sf::st_transform("+proj=utm +zone=23 +ellps=WGS84 +south +units=m")
-  
   # grid
-  output_grid <-  emis_grid(emi_list =temp_emi
-                            ,grid = temp_grid
-                            ,quiet = TRUE
-                            ,aggregate = TRUE)
+  output_grid <-  emis_grid(emi_list =temp_emi,grid = temp_grid
+                            ,quiet = TRUE,aggregate = TRUE)
   # write
   readr::write_rds(x = output_grid
-                   ,file = paste0("data/emi_grid/",files_gps_names[i])
+                   ,file = paste0("data/emi_grid/jul/",jul_files_gps_names[i])
+                   ,compress = 'gz')
+  return(NULL) 
+}
+# OCTOBER
+oct_spatial_f <- function(i){
+  temp_emi <- readr::read_rds(oct_files_gps[i])
+  #  transform
+  temp_emi$tp_model <- temp_emi$tp_model %>% 
+    sf::st_transform("+proj=utm +zone=23 +ellps=WGS84 +south +units=m")
+  # grid
+  output_grid <-  emis_grid(emi_list =temp_emi,grid = temp_grid
+                            ,quiet = TRUE,aggregate = TRUE)
+  # write
+  readr::write_rds(x = output_grid
+                   ,file = paste0("data/emi_grid/oct/",oct_files_gps_names[i])
                    ,compress = 'gz')
   return(NULL) 
 }
 
-
 oplan <- future::plan(strategy =  "multisession",workers = 35)
 requiredPackages = c('data.table', 'sf', 'units')
 
-spatial_process <- furrr::future_map(seq_along(files_gps)
-                  ,spatial_f 
-                  ,.options = furrr::furrr_options(
-                    seed=TRUE
-                    ,packages = requiredPackages))
+# JULY
+spatial_process <- furrr::future_map(seq_along(jul_files_gps)
+                                     ,jul_spatial_f 
+                                     ,.options = furrr::furrr_options(
+                                       seed=TRUE
+                                       ,packages = requiredPackages))
+# OCT
+spatial_process <- furrr::future_map(seq_along(oct_files_gps)
+                                     ,oct_spatial_f 
+                                     ,.options = furrr::furrr_options(
+                                       seed=TRUE
+                                       ,packages = requiredPackages))
 
 ## b) Spatial / TIME post-processing-----
 rm(list=ls())
 gc(reset = TRUE)
 
 dir.create("data/emi_grid_time/")
+dir.create("data/emi_grid_time/jul/")
+dir.create("data/emi_grid_time/oct/")
 
 # list-files
-files_gps <- list.files(path = 'data/emissions/',full.names = TRUE)
-files_gps_names <- list.files(path = 'data/emissions/',full.names = FALSE)
+jul_files_gps <- list.files(path = 'data/emissions/jul/',full.names = TRUE)
+jul_files_gps_names <- list.files(path = 'data/emissions/jul/',full.names = FALSE)
+oct_files_gps <- list.files(path = 'data/emissions/oct/',full.names = TRUE)
+oct_files_gps_names <- list.files(path = 'data/emissions/oct/',full.names = FALSE)
+
 
 temp_grid <- readr::read_rds("data-raw/bra_spo_grid.rds")
 temp_grid <-  sf::st_transform(temp_grid,"+proj=utm +zone=23 +ellps=WGS84 +south +units=m")
 
-spatial_f <- function(i){ # i = 2
-  #message(paste0("Emi grid of file '",files_gps_names[i],"'"))
-  
-  temp_emi <- readr::read_rds(files_gps[i])
-  
+# jul
+jul_spatial_f <- function(i){
+  temp_emi <- readr::read_rds(jul_files_gps[i])
   #  transform
   temp_emi$tp_model <- temp_emi$tp_model %>% 
     sf::st_transform("+proj=utm +zone=23 +ellps=WGS84 +south +units=m")
-  
   # grid
   output_grid <-  emis_grid(emi_list =temp_emi
                             ,grid = temp_grid
@@ -273,34 +319,64 @@ spatial_f <- function(i){ # i = 2
                             ,time_resolution = "hour")
   # write
   readr::write_rds(x = output_grid
-                   ,file = paste0("data/emi_grid_time/",files_gps_names[i])
+                   ,file = paste0("data/emi_grid_time/jul/",jul_files_gps_names[i])
+                   ,compress = 'gz')
+  return(NULL) 
+}
+# oct
+oct_spatial_f <- function(i){
+  temp_emi <- readr::read_rds(oct_files_gps[i])
+  #  transform
+  temp_emi$tp_model <- temp_emi$tp_model %>% 
+    sf::st_transform("+proj=utm +zone=23 +ellps=WGS84 +south +units=m")
+  # grid
+  output_grid <-  emis_grid(emi_list =temp_emi
+                            ,grid = temp_grid
+                            ,quiet = TRUE
+                            ,aggregate = TRUE
+                            ,time_resolution = "hour")
+  # write
+  readr::write_rds(x = output_grid
+                   ,file = paste0("data/emi_grid_time/oct/",oct_files_gps_names[i])
                    ,compress = 'gz')
   return(NULL) 
 }
 
-
 oplan <- future::plan(strategy =  "multisession",workers = 35)
 requiredPackages = c('data.table', 'sf', 'units')
 
-spatial_processing <- furrr::future_map(seq_along(files_gps)
-                                        ,spatial_f 
+# JUL
+spatial_processing <- furrr::future_map(seq_along(jul_files_gps)
+                                        ,jul_spatial_f 
                                         ,.options = furrr::furrr_options(
                                           seed=TRUE
                                           ,packages = requiredPackages))
+# OCT
+spatial_processing <- furrr::future_map(seq_along(oct_files_gps)
+                                        ,oct_spatial_f 
+                                        ,.options = furrr::furrr_options(
+                                          seed=TRUE
+                                          ,packages = requiredPackages))
+
 
 ## c) Vehicle-age post-processing-----
 rm(list=ls())
 gc(reset = TRUE)
 
 dir.create("data/emi_age/")
+dir.create("data/emi_age/jul/")
+dir.create("data/emi_age/oct/")
 
 # list-files
-files_gps <- list.files(path = 'data/emissions/',full.names = TRUE)
-files_gps_names <- list.files(path = 'data/emissions/',full.names = FALSE)
+jul_files_gps <- list.files(path = 'data/emissions/jul/',full.names = TRUE)
+jul_files_gps_names <- list.files(path = 'data/emissions/jul/',full.names = FALSE)
 
-f_veh_agr <- function(i){ # i = 1
-  # read
-  temp_emi <- readr::read_rds(files_gps[i])
+oct_files_gps <- list.files(path = 'data/emissions/oct/',full.names = TRUE)
+oct_files_gps_names <- list.files(path = 'data/emissions/oct/',full.names = FALSE)
+
+# July
+jul_f_veh_agr <- function(i){
+  temp_emi <- readr::read_rds(jul_files_gps[i])
   # process
   temp_emi_dt <- emis_summary(emi_list = temp_emi
                               ,by = "vehicle"
@@ -310,16 +386,38 @@ f_veh_agr <- function(i){ # i = 1
   temp_emi_dt$VTK <- sum(units::set_units(temp_emi$tp_model$dist,"km"))
   # write
   readr::write_rds(x = temp_emi_dt
-                   ,file = paste0("data/emi_age/",files_gps_names[i])
+                   ,file = paste0("data/emi_age/jul/",jul_files_gps_names[i])
+                   ,compress = 'gz')
+  return(NULL)
+}
+# October
+oct_f_veh_agr <- function(i){
+  temp_emi <- readr::read_rds(oct_files_gps[i])
+  # process
+  temp_emi_dt <- emis_summary(emi_list = temp_emi
+                              ,by = "vehicle"
+                              ,veh_vars = c("veh_type","euro"
+                                            ,"fuel","tech","fleet_composition"
+                              ))
+  temp_emi_dt$VTK <- sum(units::set_units(temp_emi$tp_model$dist,"km"))
+  # write
+  readr::write_rds(x = temp_emi_dt
+                   ,file = paste0("data/emi_age/oct/",oct_files_gps_names[i])
                    ,compress = 'gz')
   return(NULL)
 }
 
+# process
 future::plan(strategy =  "multisession",workers = 35)
 requiredPackages = c('data.table', 'sf', 'units')
 
-furrr::future_map(seq_along(files_gps)
-                  ,f_veh_agr 
+furrr::future_map(seq_along(jul_files_gps)
+                  ,jul_f_veh_agr 
+                  ,.options = furrr::furrr_options(
+                    seed=TRUE
+                    ,packages = requiredPackages))
+furrr::future_map(seq_along(oct_files_gps)
+                  ,oct_f_veh_agr 
                   ,.options = furrr::furrr_options(
                     seed=TRUE
                     ,packages = requiredPackages))

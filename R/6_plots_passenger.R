@@ -22,8 +22,9 @@ extrafont::fonts()
 
 # 2) Prepare  OCUP data ----
 sp_path <- "L:/Proj_emission_routes/data-raw/passengers/bra_spo/50544_CARREGAMENTOS_LINHAS_OUT2019_POR_PTO_SENTIDO.XLSX"
+sp_path <- "data-raw/passenger/50544_CARREGAMENTOS_LINHAS_OUT2019_POR_PTO_SENTIDO.XLSX"
 dt_raw <- readxl::read_xlsx(path = sp_path)
-setDT(dt_raw)
+data.table::setDT(dt_raw)
 
 my_names <- stringr::str_split(names(dt_raw),",")[[1]] 
 setnames(dt_raw,old = names(dt_raw),new = "all")
@@ -151,45 +152,46 @@ gc(reset = TRUE)
 
 # read emi_time
 
-dir.create("data/vtk_hour/")
-emi_path <- list.files("data/emissions////",full.names = TRUE)
-emi_files <- list.files("data/emissions////",full.names = F)
+dir.create("data/oct/vtk_hour/")
+emi_path <- list.files("data/oct/emissions////",full.names = TRUE)
+emi_files <- list.files("data/oct/emissions////",full.names = F)
 emi_files[1]
 lapply(seq_along(emi_path),function(i){ # i = 1
   emi_dt <- readr::read_rds(emi_path[i])
   emi_dt <- emi_dt$tp_model
   setDT(emi_dt)
   emi_dt[,hour := data.table::hour(from_timestamp)]
+  emi_dt[,from_to := paste0(from_stop_id,"_",to_stop_id)]
   emi_dt <- emi_dt[,list(dist = sum(dist,na.rm = TRUE)
-                         ,trip_number = uniqueN(trip_number)),by = hour]
+                         ,veh_number = length(from_to)),by = hour]
   readr::write_rds(x = emi_dt
-                   ,file = paste0("data/vtk_hour/",emi_files[i]))
+                   ,file = paste0("data/oct/vtk_hour/",emi_files[i]))
   return(NULL)
 })
 
 # read
 rm(list=ls())
 gc(reset = TRUE)
-emi_files <- list.files("data/vtk_hour////",full.names = T)
+emi_files <- list.files("data/oct/vtk_hour////",full.names = T)
 emi_dt <- lapply(emi_files,readr::read_rds) %>% data.table::rbindlist()
 emi_dt <- emi_dt[,list(dist = sum(dist,na.rm = TRUE)
-                       ,total_trip = sum(trip_number,na.rm=TRUE))
+                       ,veh_number = sum(veh_number,na.rm=TRUE))
                  ,by = hour]
-readr::write_rds(x = emi_dt,"data/pax/vtk_hour.rds")
+readr::write_rds(x = emi_dt,"data/oct/pax_vtk_hour.rds")
 
 # 5) Plot Co2/cap -----
 rm(list=ls())
 gc(reset = TRUE)
 
 dt_h_trip <- readr::read_rds("data/pax/dt_h_trip.rds")
-
 tmp_h_trip <- copy(dt_h_trip) %>% 
   .[,passageiros := as.numeric(passageiros)] %>% 
   .[,sum(passageiros,na.rm = TRUE),by = .(horario)]
 
+tmp_h_trip[]
 # read emi_time
 
-emi_files <- list.files("data/emi_time/",full.names = TRUE)
+emi_files <- list.files("data/oct/emi_time/",full.names = TRUE)
 emi_dt <- lapply(emi_files,readr::read_rds) %>% data.table::rbindlist()
 emi_dt <- emi_dt[pollutant == "CO2",
                  list("emi" = sum(emi,na.rm = TRUE))
@@ -197,20 +199,24 @@ emi_dt <- emi_dt[pollutant == "CO2",
 emi_dt[1,]
 
 
-# read total dist
-dist_dt <- readr::read_rds("data/pax/vtk_hour.rds")
+# # read total dist
+# dist_dt <- readr::read_rds("data/oct/oct_vtk_hour.rds")
+dist_dt <- readr::read_rds("data/oct/pax_vtk_hour.rds")
+dist_dt[1,]
 
 # merge
-units::install_unit("pax")
+try(units::install_unit("pax"),silent = TRUE)
 tmp_h_trip[emi_dt,on = c("horario" = "timestamp_hour"),emi := i.emi]
 tmp_h_trip <- tmp_h_trip[dist_dt,on = c("horario" = "hour")]
 tmp_h_trip[,pax := units::set_units(V1,"pax")]
-tmp_h_trip[,emi_capita := emi/pax]
-tmp_h_trip[,veh_cap := units::set_units(total_trip * 100,"pax")]
+tmp_h_trip[,pax := units::set_units(pax,"kpax")]
+tmp_h_trip[,emi_capita := units::set_units(emi/pax,"g/pax")]
+tmp_h_trip[,veh_cap := units::set_units(veh_number * 70,"pax")]
+tmp_h_trip[,veh_cap := units::set_units(veh_cap,"kpax")]
 tmp_h_trip[,occupancy := 100 * pax / veh_cap]
-tmp_h_trip[,emi_dist := emi/dist]
-tmp_h_trip[,emi_dist_cap := emi/(dist*pax)]
-tmp_h_trip[,dist_trip := dist / total_trip]
+tmp_h_trip[,emi_dist := units::set_units(emi/dist,'g/km')]
+tmp_h_trip[,emi_dist_cap := units::set_units(emi_dist/pax,"g/(km*pax)")]
+#tmp_h_trip[,dist_trip := dist / total_trip]
 
 # dcast
 tmp_h_trip1 <- data.table::melt(data = tmp_h_trip,
@@ -218,14 +224,47 @@ tmp_h_trip1 <- data.table::melt(data = tmp_h_trip,
                                 measure.vars = c("emi"
                                                  ,"pax"
                                                  ,"dist"
-                                                 ,"total_trip"
+                                                 ,"veh_number"
                                                  ,"emi_capita"
                                                  ,"veh_cap"
                                                  ,"emi_dist"
-                                                 ,"dist_trip"
+                                                 ,"occupancy"
                                                  ,"emi_dist_cap"),
                                 variable.name = "variables")
-tmp_h_trip1[1:4,]
+
+tmp_h_trip1$variables1 <- factor(x = tmp_h_trip1$variables
+                                 ,levels = c("emi"
+                                             ,"veh_cap"
+                                             ,"pax"
+                                             ,"occupancy"
+                                             ,"emi_capita"
+                                             ,"dist"
+                                             ,"veh_number"
+                                             ,"emi_dist"
+                                             ,"emi_dist_cap"
+                                            )
+                                 ,labels = c( "CO[2] (g)"
+                                              ,"'Total Vehicle Capacity ' (thousands)"
+                                              ,"'Total Passengers ' (thousands)"
+                                              ,"'Mean Vehicle Occupancy (%)'"
+                                              ,"'Emissions per capita ' (g/person)"
+                                              ,"'Total distance ' (km)"
+                                              ,"'Total stop-segments '"
+                                              ,"'Emissions per distance ' (g/km)"
+                                              ,"'Emissions per distance per capita ' (g/(km/person))"
+                                             ))
+
+
+# save for additional analysis -----
+
+readr::write_rds(tmp_h_trip1,"data/pax/co2_emissions_variables.rds")
+number_plots = 6 
+if(number_plots == 6){
+  tmp_h_trip1 <- tmp_h_trip1 %>% 
+    .[variables %in% c("emi","pax","emi_capita","veh_cap","emi_dist_cap","occupancy"),]
+  
+}
+
 
 ggplot(tmp_h_trip1)+
   geom_col(aes(y = as.numeric(value),x = horario))+
@@ -234,18 +273,8 @@ ggplot(tmp_h_trip1)+
                      ,limits = c(0-1,23+1)
                      ,expand = c(0,0))+
   # labs
-  facet_wrap(~variables,nrow = 2,scales = "free_y"
-             ,labeller =  as_labeller(c(
-               `emi` = "CO2 emissions [g]",
-               `total_trip` = "Total trips",
-               `pax` = "Total passenger [pax]",
-               `dist` = "Total distance [km]",
-               `veh_cap` = "Occupancy [%]",
-               `dist_trip` = "Distance per trip [km]",
-               `emi_capita`="Emission per capita [g/pax]",
-               `emi_dist`="Emission per distance [g/km]",
-               `emi_dist_cap`="Emission per distance \nper capita [g/(km * pax)]"
-             )))+
+  facet_wrap(~variables1,ncol = 2,scales = "free_y"
+             ,labeller = "label_parsed")+
   labs(y = NULL,x = "Hour")+
   # theme
   theme_light()+
@@ -259,389 +288,44 @@ ggplot(tmp_h_trip1)+
   )+
   guides(fill = guide_legend(title.position = "top"))
 
-ggplot2::ggsave(filename = "figures/pax/co2_per_capita.png"
-                , scale = 0.55  
-                , width = 40
-                , height = 12.5
+
+ggplot2::ggsave(filename =  fifelse(number_plots == 6,
+                                    "figures/pax/co2_per_capita.png",
+                                    "figures/pax/co2_per_capita_all.png")
+                , scale =  fifelse(number_plots == 6,0.85,0.85) # 2 x 4 plots  
+                #, scale = 0.75  # 2 x 2 plots
+                , height = fifelse(number_plots == 6,12.5,18.5) # 2 x 4 plots  
+                , width = 20 # 2 x 2 plots
+                #, height = 12.5
                 , bg = "white" 
-                , units = "cm" , dpi = 300 )
+                  , units = "cm" , dpi = 300 )
 
-# P Co2/(capita * route) -----
-rm(list=ls())
 
-# read GTFS
-output_path <- "data/pax/prep_spo_gtfs.rds"
-gtfs_spo <- readr::read_rds(output_path)
+## mean stats -----
 
-# read h_trip
-dt_h_trip <- readr::read_rds("data/pax/dt_h_trip.rds")
-tmp_h_trip <- copy(dt_h_trip) %>% 
-  .[,passageiros := as.numeric(passageiros)] %>% 
-  .[gtfs_spo$trips, on = "route_id",shape_id := i.shape_id]  %>%
-  .[,sum(passageiros,na.rm = TRUE),by = .(horario,shape_id)]
+unique(tmp_h_trip1$variables)
 
+### mean Ef ----
+tmp_h_trip1[,{
+  emi <- value[variables == "emi"]
+  dist <- value[variables == "dist"]
+  emi_dist = sum(emi)/sum(dist)
+  list("emi_dist" = emi_dist)
+}] 
 
-# read emi_time
-main_f <- "L://Proj_acess_oport//git_jbazzo//gtfs2emis_paper//data/emi_time/"
-emi_files <- list.files(main_f,full.names = TRUE)
-emi_shapes <- list.files(main_f,full.names = F) %>% gsub(".rds","",.)
-emi_dt <- lapply(seq_along(emi_files),function(i){
-  dt1 <- readr::read_rds(emi_files[i])
-  dt1[,shape_id := emi_shapes[i]]
-  return(dt1)
-}) %>% data.table::rbindlist()
+### ef for hour ----
+tmp_h_trip1[variables == "emi_dist",] %>% 
+  .[order(horario)]
 
-# emissions per time and shape_id
-emi_dt <- emi_dt[pollutant == "CO2",sum(emi,na.rm = TRUE)
-                 ,by = .(timestamp_hour,shape_id)]
+### ef for HPM ----
+tmp_h_trip1[,{
+  emi <- value[variables == "emi"]
+  dist <- value[variables == "dist"]
+  emi_dist = sum(emi)/sum(dist)
+  list("emi_dist" = emi_dist)
+}] 
 
-# merge
-# units::install_unit("pax")
-tmp_h_trip[1,]
-emi_dt[1,]
-tmp_h_trip[emi_dt,on = c("horario" = "timestamp_hour"
-                         ,"shape_id" = "shape_id")
-           ,emi := i.V1]
-tmp_h_trip[,pax := units::set_units(V1,"pax")]
-tmp_h_trip[,emi_capita := emi/pax]
-
-# dcast
-tmp_h_trip1 <- data.table::melt(data = tmp_h_trip,
-                                id.vars = c("horario","shape_id"),
-                                measure.vars = c("emi","pax","emi_capita"),
-                                variable.name = "variables")
-tmp_h_trip1[1:4,]
-
-# plot 
-ggplot(tmp_h_trip1)+
-  geom_boxplot(aes(y = as.numeric(value),x = horario,group = horario))+
-  facet_wrap(~variables,ncol = 1,scales = "free_y"
-             ,labeller =  as_labeller(c(
-               `emi` = "CO2 emissions [g]",
-               `pax` = "Total passenger [pax]",
-               `emi_capita`="Emission per capita [g/pax]"
-             )))+
-  labs(y = NULL,x = "Hour")
-
-dir.create("figures/pax/")
-ggplot2::ggsave(filename = "figures/pax/co2_per_capita_bp.png"
-                , scale = 0.6
-                , width = 20
-                , bg = "white"
-                  , height = 25
-                , units = "cm"
-                , dpi = 300)
-
-# Plot Co2/ (capita * stree link) -----
-rm(list=ls())
-gc(reset = TRUE)
-
-# read h_trip
-dt_h_trip <- readr::read_rds("data/pax/dt_h_trip.rds")
-tmp_h_trip <- copy(dt_h_trip) %>% 
-  .[,passageiros := as.numeric(passageiros)] %>% 
-  .[,stop_id_atual  := as.integer(stop_id_atual) %>% as.character()] %>% 
-  .[,prox_stop_id   := as.integer(prox_stop_id) %>% as.character()] %>% 
-  .[,passageiros := as.numeric(passageiros)] %>% 
-  .[,sum(passageiros,na.rm = TRUE),by = .(stop_id_atual,prox_stop_id)]
-
-tmp_h_trip[1,]
-
-# read emi by stops interval
-
-main_f <- "L://Proj_acess_oport//git_jbazzo//gtfs2emis_paper//data/emissions//"
-emi_files <- list.files(main_f,full.names = TRUE)
-emi_shapes <- list.files(main_f,full.names = F) %>% gsub(".rds","",.)
-
-## processing data -----
-future::plan(strategy = "multisession", workers = 35)
-emi_dt <- furrr::future_map(.x = seq_along(emi_files)
-                            ,.f = function(i){ # i = 1
-                              
-                              dt1 <- readr::read_rds(emi_files[i])
-                              
-                              # emi_to_dt by 
-                              dt2 <- gtfs2emis::emis_to_dt(emi_list = dt1) %>% 
-                                .[pollutant == "CO2",] %>% 
-                                .[,list("emi" = sum(emi)),by = .(segment_id)] %>% 
-                                .[,dist := dt1$tp_model$dist] %>% 
-                                # add info
-                                .[,from_stop_id := dt1$tp_model$from_stop_id] %>% 
-                                .[,to_stop_id := dt1$tp_model$to_stop_id] %>% 
-                                .[,geometry := dt1$tp_model$geometry] %>% 
-                                .[,shape_id := emi_shapes[i]] %>% 
-                                # sum by stop
-                                .[,list("emi" = sum(emi)
-                                        ,"dist" = sum(dist)
-                                        ,"geometry" = geometry[1])
-                                  ,by = .(from_stop_id,to_stop_id,shape_id)] 
-                              
-                              return(dt2)
-                            }) %>% data.table::rbindlist()
-
-readr::write_rds(x = emi_dt
-                 ,file = "data/pax/emi_dt_spatial.rds"
-                 ,compress = "gz")
-
-## Analysis ----
-rm(list=ls())
-
-emi_dt <- readr::read_rds("data/pax/emi_dt_spatial.rds")
-emi_dt[1,]
-
-emi_dt <- emi_dt[
-  ,list("emi" = sum(emi,na.rm = TRUE),
-        "dist" = sum(dist,na.rm = TRUE),"geometry" = geometry[1])
-  ,by = .(from_stop_id, to_stop_id)]
-emi_dt <- emi_dt[from_stop_id != "-" & to_stop_id != "-",]
-
-head(emi_dt)
-
-# read h_trip
-dt_h_trip <- readr::read_rds("data/pax/carregamento_prep.rds")
-tmp_h_trip <- copy(dt_h_trip) %>% 
-  .[,stop_id_atual  := as.integer(stop_id_atual) %>% as.character()] %>% 
-  .[,prox_stop_id   := as.integer(prox_stop_id) %>% as.character()] %>% 
-  .[,list("pax" = sum(day_carreg,na.rm = TRUE))
-    ,by = .(stop_id_atual,prox_stop_id)]
-
-# merge datasets
-# units::install_unit("pax")
-
-tmp_h_trip[1,]
-emi_dt[1,]
-
-tmp_h_trip[emi_dt,on = c("stop_id_atual" = "from_stop_id"
-                         ,"prox_stop_id" = "to_stop_id")
-           ,":=" (emi = i.emi
-                  ,dist = i.dist
-                  ,geometry = i.geometry)]
-
-# sum emissions and passengers by interval
-
-tmp_h_trip <- tmp_h_trip[,list(
-  "pax" = sum(pax,na.rm = TRUE)
-  ,"dist" = sum(dist,na.rm = TRUE)
-  ,"emi" = sum(emi,na.rm = TRUE)
-  ,"geometry" = geometry[1]
-), by = .(stop_id_atual,prox_stop_id)]
-
-tmp_h_trip[,pax := units::set_units(pax,"pax")]
-tmp_h_trip[,emi_capita := emi/pax]
-
-# ratio of missing emi
-# (conditions where emi = 0 and pax > 0)
-tmp_miss <- tmp_h_trip[as.numeric(pax) > 0 & as.numeric(emi) == 0,]
-nrow(tmp_miss) # 1715
-
-# percentage of missing
-100 * (nrow(tmp_miss) / nrow(tmp_h_trip)) # 5.731377
-
-# remove missing
-tmp_h_trip <- tmp_h_trip[as.numeric(pax) > 0 & as.numeric(emi) > 0,]
-
-# to sf 
-tmp_h_trip <- sf::st_as_sf(tmp_h_trip)
-
-tmp_h_trip$emi_capita_distance <- tmp_h_trip$emi_capita / tmp_h_trip$dist
-
-p1 <- ggplot(data = tmp_h_trip)+
-  geom_point(aes(x = as.numeric(pax)
-                 ,y = as.numeric(emi)
-                 ,color = as.numeric(emi_capita_distance))
-             ,alpha = 0.25)+
-  scale_color_viridis_c(trans="log10")+
-  labs(x = "Passengers [pax]"
-       ,y = "CO2 emissions [g]"
-       ,title = "CO2 emissions and total passengers in São Paulo"
-       ,subtitle = "Measures for one street link segment in a typical business day"
-       ,color = "CO2 emissions / (passenger.distance)\n [g/(pax.km)]")+
-  theme(legend.position = "bottom")
-
-p1
-
-# limit passengers
-p2 <- tmp_h_trip[as.numeric(tmp_h_trip$pax) < 2500,] %>% 
-  ggplot(data = .)+
-  geom_point(aes(x = as.numeric(pax)
-                 ,y = as.numeric(emi)
-                 ,color = as.numeric(emi_capita_distance))
-             ,alpha = 0.25)+
-  scale_color_viridis_c(trans="log10")+
-  labs(x = "Passengers [pax]"
-       ,y = "CO2 emissions [g]"
-       ,color = "CO2 emissions / (passenger.distance)\n [g/(pax.km)]")+
-  theme(legend.position = "bottom")
-
-p1 / p2
-
-
-# Plot co2/pax*km ------
-rm(list=ls())
-
-units::install_unit("pax")
-emi_dt <- readr::read_rds("data/pax/emi_dt_spatial.rds")
-emi_dt[1,]
-
-emi_dt <- emi_dt[
-  ,list("emi" = sum(emi,na.rm = TRUE)
-        ,"dist" = sum(dist,na.rm = TRUE)
-        ,"geometry" = geometry[1])
-  ,by = .(from_stop_id, to_stop_id)]
-emi_dt <- emi_dt[from_stop_id != "-" & to_stop_id != "-",]
-
-head(emi_dt)
-
-# read h_trip
-tmp_h_trip <- readr::read_rds("data/pax/carregamento_prep.rds")
-tmp_h_trip <- copy(tmp_h_trip) %>% 
-  .[,stop_id_atual  := as.integer(stop_id_atual) %>% as.character()] %>% 
-  .[,prox_stop_id   := as.integer(prox_stop_id) %>% as.character()] %>% 
-  .[,list("pax" = sum(day_carreg,na.rm = TRUE))
-    ,by = .(stop_id_atual,prox_stop_id)]
-
-# merge datasets
-
-
-tmp_h_trip[1,]
-emi_dt[1,]
-
-tmp_h_trip[emi_dt,on = c("stop_id_atual" = "from_stop_id"
-                         ,"prox_stop_id" = "to_stop_id")
-           ,":=" (emi = i.emi
-                  ,dist = i.dist
-                  ,geometry = i.geometry)]
-
-# sum emissions and passengers by interval
-
-tmp_h_trip <- tmp_h_trip[,list(
-  "pax" = sum(pax,na.rm = TRUE)
-  ,"emi" = sum(emi,na.rm = TRUE)
-  ,"dist" = sum(dist,na.rm = TRUE)
-  ,"geometry" = geometry[1]
-), by = .(stop_id_atual,prox_stop_id)]
-
-tmp_h_trip[,pax := units::set_units(pax,"pax")]
-tmp_h_trip[,emi_capita := emi/pax]
-
-tmp_h_trip[1,]
-# ratio of missing emi
-# (conditions where emi = 0 and pax > 0)
-tmp_miss <- tmp_h_trip[as.numeric(pax) > 0 & as.numeric(emi) == 0,]
-nrow(tmp_miss);rm(tmp_miss) # 1557
-
-# remove missing
-tmp_h_trip <- tmp_h_trip[as.numeric(pax) > 0 & as.numeric(emi) > 0,]
-
-setnames(tmp_h_trip
-         ,old = c("stop_id_atual","prox_stop_id")
-         ,new = c("from_stop_id","to_stop_id"))
-
-tmp_h_trip[,stop_sequence := 1:.N]
-# to sf 
-tmp_h_trip <- sf::st_as_sf(tmp_h_trip)
-tmp_h_trip$shape_id <- "IDK"
-
-hex_spo <- readr::read_rds("data-raw/bra_spo_grid.rds")
-
-
-
-# run multiple times
-dir.create("data/pax/grid/")
-nrow(tmp_h_trip)
-b_seq <- seq(1,nrow(tmp_h_trip),by = 100)
-end_seq <- shift(b_seq-1,1,nrow(tmp_h_trip),type = "lead") 
-head(b_seq);head(end_seq)
-tail(b_seq);tail(end_seq)
-inter_list <- lapply(seq_along(b_seq),function(i){
-  return(b_seq[i]:end_seq[i])
-})
-
-tmp_h_trip$pax <- 
-  units::set_units(
-    as.numeric(tmp_h_trip$pax),"m^2")
-
-
-grid_pax <- function(i){ # i = 1
-  
-  intv = inter_list[[i]]
-  emi_dt <- tmp_h_trip[intv,c("pax","emi","dist")]
-  emi_dt$geometry <- NULL
-  
-  emi <- list("tp_model" = tmp_h_trip[intv,]
-              ,"emi" = emi_dt)
-  
-  tmp_grid <- gtfs2emis::emis_grid(emi_list = emi
-                                   ,grid = hex_spo
-                                   ,time_resolution = 'day'
-                                   ,quiet = TRUE
-                                   ,aggregate = FALSE)
-  
-  output_path <- sprintf("data/pax/grid/%s.rds",i)
-  readr::write_rds(x = tmp_grid
-                   ,file = output_path)
-  return(NULL)
-  
-}
-
-
-future::plan("multisession", workers = 35)
-lapply(X = seq_along(inter_list)
-       ,FUN = grid_pax) 
-
-## read grids ----
-rm(list=ls())
-gridded_pax_files <- list.files("data/pax/grid/"
-                                ,full.names = TRUE)
-
-gridded_pax <- lapply(gridded_pax_files,
-                      readr::read_rds) %>% 
-  data.table::rbindlist()
-
-gridded_pax <- gridded_pax[,{ 
-  list("emi" = sum(emi,na.rm = TRUE)
-       ,"pax" = sum(pax,na.rm = TRUE) %>% as.numeric()
-       ,"dist" = sum(dist,na.rm = TRUE)
-       ,"geometry" = geom[1])
-},by = .(id_hex)]
-gridded_pax[,pax := units::set_units(pax,"pax")]
-gridded_pax[,emi_pax := emi / (pax)]
-gridded_pax[,avg_ef := emi / (dist)]
-
-#gridded_pax <- gridded_pax[as.numeric(pax) > 4,]
-gridded_pax$avg_ef %>% summary()
-gridded_pax$emi_pax %>% summary()
-gridded_pax[as.numeric(emi_pax) > 300,]
-
-
-setDT(gridded_pax)
-gridded_pax <- sf::st_as_sf(gridded_pax)
-
-summary(gridded_pax$emi_pax)
-### CO2 per capita spatial-----
-gridded_pax %>% 
-  setDT() %>% 
-  #.[as.numeric(pax) > 9,] %>% .[] %>% 
-  #.[as.numeric(emi_pax) < 3000,] %>% .[] %>% 
-  sf::st_as_sf() %>% 
-  ggplot()+
-  geom_sf(aes(fill = as.numeric(emi_pax)), color = NA)+ 
-  scale_fill_viridis_c(
-    option = "D"
-    ,direction = -1
-    , trans = "log"
-    ,label = function(x) sprintf("%.0f", x)
-  )  +
-  labs(fill = "CO2 per capita\n[g / (pax)]")+
-  theme_bw()+
-  theme(legend.position = "bottom")
-
-ggplot2::ggsave(filename = "figures/pax/mapa_co2_per_pax.png"
-                ,scale = 0.6,width = 14,
-                bg = "white",
-                height = 20,units = "cm",dpi = 300)
-
-# Plot3  CO2 zoom ----
+# 6) CO2, pax, co2/pax zoom ----
 rm(list=ls())
 units::install_unit("pax")
 
@@ -746,7 +430,7 @@ lim_fill_co2 <- bind_grid %>%
   as.numeric() %>% as.vector()
 
 ## gtfs ----
-spo_gtfs <- gtfstools::read_gtfs("data/gtfs_spo_sptrans_prep.zip")
+spo_gtfs <- gtfstools::read_gtfs("data/jul/gtfs_spo_sptrans_prep_oct.zip")
 gps_lines_sf <- gtfstools::convert_shapes_to_sf(gtfs = spo_gtfs)
 stops_sf <- gtfstools::convert_stops_to_sf(gtfs = spo_gtfs)
 
@@ -774,7 +458,7 @@ pr <- bind_grid %>%
 
 f_full <- function(dt_full,input,map = TRUE){
   if( input == 'q_emi'    ) mytitle <- expression(CO[2][] (g))
-  if( input == 'q_pax'    ) mytitle <- expression(Passenger)
+  if( input == 'q_pax'    ) mytitle <- "Number of\npassengers"
   if( input == 'q_emi_pax') mytitle <- expression(CO[2]~per~passenger(g))
   
   
@@ -866,7 +550,7 @@ f_zoom <- function(dt_zoom,map = TRUE,rm_fill = TRUE){
     scale_fill_viridis_d(
       option = "D"
       ,direction = -1
-      ,labels = c("1 (bottom)",2:4,"5 (up)")
+      ,labels = c("1 (bottom)",2:4,"5 (top)")
     ) +
     # add street network
     geom_sf(data = intersect_lines_sf
@@ -881,7 +565,7 @@ f_zoom <- function(dt_zoom,map = TRUE,rm_fill = TRUE){
     facet_wrap(~variable
                ,labeller = as_labeller(
                  c(`q_emi` = "CO2 emissions (g)",
-                   `q_pax` = "Passenger (pax)",
+                   `q_pax` = "Number of\npassenger (pax)",
                    `q_emi_pax` = "CO2 per pax (g/pax)")
                ))+
     # labels 
@@ -963,5 +647,200 @@ ggplot2::ggsave(plot = pf1
                   , height = 17
                 , units = "cm"
                 , dpi = 300)
+
+# 7) Extra ------
+## 7.1) Plot Co2/ (capita * stree link) -----
+rm(list=ls())
+gc(reset = TRUE)
+
+# read h_trip
+dt_h_trip <- readr::read_rds("data/pax/dt_h_trip.rds")
+tmp_h_trip <- copy(dt_h_trip) %>% 
+  .[,passageiros := as.numeric(passageiros)] %>% 
+  .[,stop_id_atual  := as.integer(stop_id_atual) %>% as.character()] %>% 
+  .[,prox_stop_id   := as.integer(prox_stop_id) %>% as.character()] %>% 
+  .[,passageiros := as.numeric(passageiros)] %>% 
+  .[,sum(passageiros,na.rm = TRUE),by = .(stop_id_atual,prox_stop_id)]
+
+tmp_h_trip[1,]
+
+# read emi by stops interval
+
+main_f <- "L://Proj_acess_oport//git_jbazzo//gtfs2emis_paper//data/emissions//"
+main_f <- "data/oct/emissions/"
+emi_files <- list.files(main_f,full.names = TRUE)
+emi_shapes <- list.files(main_f,full.names = F) %>% gsub(".rds","",.)
+
+## processing data -----
+future::plan(strategy = "multisession", workers = 1)
+emi_dt <- furrr::future_map(.x = seq_along(emi_files)
+                            ,.f = function(i){ # i = 1
+                              
+                              dt1 <- readr::read_rds(emi_files[i])
+                              
+                              # emi_to_dt by 
+                              dt2 <- gtfs2emis::emis_to_dt(emi_list = dt1) %>% 
+                                .[pollutant == "CO2",] %>% 
+                                .[,list("emi" = sum(emi)),by = .(segment_id)] %>% 
+                                .[,dist := dt1$tp_model$dist] %>% 
+                                # add info
+                                .[,from_stop_id := dt1$tp_model$from_stop_id] %>% 
+                                .[,to_stop_id := dt1$tp_model$to_stop_id] %>% 
+                                .[,geometry := dt1$tp_model$geometry] %>% 
+                                .[,shape_id := emi_shapes[i]] %>% 
+                                # sum by stop
+                                .[,list("emi" = sum(emi)
+                                        ,"dist" = sum(dist)
+                                        ,"geometry" = geometry[1])
+                                  ,by = .(from_stop_id,to_stop_id,shape_id)] 
+                              
+                              return(dt2)
+                            }) %>% data.table::rbindlist()
+
+readr::write_rds(x = emi_dt
+                 ,file = "data/oct/emi_dt_spatial.rds"
+                 ,compress = "gz")
+
+
+
+## 8) Plot co2/pax*km ------
+rm(list=ls())
+
+units::install_unit("pax")
+emi_dt <- readr::read_rds("data/oct/emi_dt_spatial.rds")
+emi_dt[1,]
+
+emi_dt <- emi_dt[
+  ,list("emi" = sum(emi,na.rm = TRUE)
+        ,"dist" = sum(dist,na.rm = TRUE)
+        ,"geometry" = geometry[1])
+  ,by = .(from_stop_id, to_stop_id)]
+emi_dt <- emi_dt[from_stop_id != "-" & to_stop_id != "-",]
+
+head(emi_dt)
+
+# read h_trip
+tmp_h_trip <- readr::read_rds("data/pax/carregamento_prep.rds")
+tmp_h_trip <- copy(tmp_h_trip) %>% 
+  .[,stop_id_atual  := as.integer(stop_id_atual) %>% as.character()] %>% 
+  .[,prox_stop_id   := as.integer(prox_stop_id) %>% as.character()] %>% 
+  .[,list("pax" = sum(day_carreg,na.rm = TRUE))
+    ,by = .(stop_id_atual,prox_stop_id)]
+
+# merge datasets
+
+
+tmp_h_trip[1,]
+emi_dt[1,]
+
+tmp_h_trip[emi_dt,on = c("stop_id_atual" = "from_stop_id"
+                         ,"prox_stop_id" = "to_stop_id")
+           ,":=" (emi = i.emi
+                  ,dist = i.dist
+                  ,geometry = i.geometry)]
+
+# sum emissions and passengers by interval
+
+tmp_h_trip <- tmp_h_trip[,list(
+  "pax" = sum(pax,na.rm = TRUE)
+  ,"emi" = sum(emi,na.rm = TRUE)
+  ,"dist" = sum(dist,na.rm = TRUE)
+  ,"geometry" = geometry[1]
+), by = .(stop_id_atual,prox_stop_id)]
+
+tmp_h_trip[,pax := units::set_units(pax,"pax")]
+tmp_h_trip[,emi_capita := emi/pax]
+
+tmp_h_trip[1,]
+# ratio of missing emi
+# (conditions where emi = 0 and pax > 0)
+tmp_miss <- tmp_h_trip[as.numeric(pax) > 0 & as.numeric(emi) == 0,]
+nrow(tmp_miss);rm(tmp_miss) # 1557
+
+# remove missing
+tmp_h_trip <- tmp_h_trip[as.numeric(pax) > 0 & as.numeric(emi) > 0,]
+
+setnames(tmp_h_trip
+         ,old = c("stop_id_atual","prox_stop_id")
+         ,new = c("from_stop_id","to_stop_id"))
+
+tmp_h_trip[,stop_sequence := 1:.N]
+# to sf 
+tmp_h_trip <- sf::st_as_sf(tmp_h_trip) #,4326)
+tmp_h_trip <- sf::st_set_crs(tmp_h_trip,4326)
+tmp_h_trip$shape_id <- "IDK"
+
+hex_spo <- readr::read_rds("data-raw/bra_spo_grid.rds")
+
+
+
+# run multiple times
+dir.create("data/pax/grid/")
+nrow(tmp_h_trip)
+b_seq <- seq(1,nrow(tmp_h_trip),by = 100)
+end_seq <- shift(b_seq-1,1,nrow(tmp_h_trip),type = "lead") 
+head(b_seq);head(end_seq)
+tail(b_seq);tail(end_seq)
+inter_list <- lapply(seq_along(b_seq),function(i){
+  return(b_seq[i]:end_seq[i])
+})
+
+tmp_h_trip$pax <- 
+  units::set_units(
+    as.numeric(tmp_h_trip$pax),"m^2")
+
+
+grid_pax <- function(i){ # i = 1
+  
+  intv = inter_list[[i]]
+  emi_dt <- tmp_h_trip[intv,c("pax","emi","dist")]
+  emi_dt$geometry <- NULL
+  
+  emi <- list("tp_model" = tmp_h_trip[intv,]
+              ,"emi" = emi_dt)
+  
+  
+  tmp_grid <- gtfs2emis::emis_grid(emi_list = emi
+                                   ,grid = hex_spo
+                                   ,time_resolution = 'day'
+                                   ,quiet = TRUE
+                                   ,aggregate = FALSE)
+  
+  output_path <- sprintf("data/pax/grid/%s.rds",i)
+  readr::write_rds(x = tmp_grid
+                   ,file = output_path)
+  return(NULL)
+  
+}
+
+
+future::plan("multisession", workers = 1)
+lapply(X = seq_along(inter_list),FUN = grid_pax) 
+
+## 8.1) read grids ----
+rm(list=ls())
+gridded_pax_files <- list.files("data/pax/grid/"
+                                ,full.names = TRUE)
+
+gridded_pax <- lapply(gridded_pax_files,
+                      readr::read_rds) %>% 
+  data.table::rbindlist()
+
+gridded_pax <- gridded_pax[,{ 
+  list("emi" = sum(emi,na.rm = TRUE)
+       ,"pax" = sum(pax,na.rm = TRUE) %>% as.numeric()
+       ,"dist" = sum(dist,na.rm = TRUE)
+       ,"geometry" = geom[1])
+},by = .(id_hex)]
+gridded_pax[,pax := units::set_units(pax,"pax")]
+gridded_pax[,emi_pax := emi / (pax)]
+gridded_pax[,avg_ef := emi / (dist)]
+
+#gridded_pax <- gridded_pax[as.numeric(pax) > 4,]
+gridded_pax$avg_ef %>% summary()
+gridded_pax$emi_pax %>% summary()
+gridded_pax[as.numeric(emi_pax) > 300,]
+
+
 
 # end -----

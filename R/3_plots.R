@@ -30,7 +30,7 @@ dir.create("figures")
 # Needs to Run Code item b) to reproduce this section
 
 # read gtfs
-spo_gtfs <- gtfstools::read_gtfs("data/gtfs_spo_sptrans_prep.zip")
+spo_gtfs <- gtfstools::read_gtfs("data/gtfs_spo_sptrans_prep_jul.zip")
 
 # read Tiles & Boundaries
 my_tile <- readr::read_rds("data-raw/bra_spo_maptile.rds")
@@ -44,10 +44,8 @@ ratio_tile <- ytile/xtile
 
 # list-files
 gps_lines_sf <- gtfstools::convert_shapes_to_sf(gtfs = spo_gtfs)
-stops_sf <- gtfstools::convert_stops_to_sf(gtfs = spo_gtfs)
 
 # aggregate by sum
-stops_sf <- sf::st_transform(stops_sf,3857)
 gps_lines_sf <- sf::st_transform(gps_lines_sf,3857)
 my_bound <- sf::st_transform(my_bound,3857)
 gps_lines_sf$label <- "Bus routes"
@@ -69,17 +67,18 @@ p <- ggplot() +
   scale_x_continuous(expand = c(0, 0)) +
   scale_y_continuous(expand = c(0, 0)) +
   # add gps_lines_sf
-  ggnewscale::new_scale_color() +
+  #ggnewscale::new_scale_color() +
   geom_sf(data = gps_lines_sf,aes(color = label)
-          ,alpha = 1, size = 0.25,fill = NA) +
+          ,alpha = 0.10, linewidth = 0.25,fill = NA) +
   scale_color_manual(values = "red",name = NULL)+
   # add boundary
-  ggnewscale::new_scale_color() +
-  geom_sf(data = my_bound,aes(color = city_name)
+  #ggnewscale::new_scale_color() +
+  geom_sf(data = my_bound#,aes(color = city_name)
+          ,color = "black"
           ,linetype = "solid",alpha = 0.75, size = 0.25,fill = NA) +
-  scale_color_manual(values = "black",name = NULL
-                     ,labels = "City boundary")+
-  coord_sf(xlim = xlim_coord, ylim = ylim_coord,expand = FALSE) +
+  #scale_color_manual(values = "black",name = NULL
+  #                   ,labels = "City boundary")+
+  #coord_sf(xlim = xlim_coord, ylim = ylim_coord,expand = FALSE) +
   # labels and theme
   labs(title = NULL
        , color = NULL
@@ -104,9 +103,10 @@ p <- ggplot() +
   theme(legend.position = c(0.75,0.2),
         text = element_text(family = "LM Roman 10"),
         legend.box.background = element_rect(fill = "white",color = "white"),
-        legend.box.margin = margin(0,0,0,0, "pt")) 
+        legend.box.margin = margin(0,0,0,0, "pt")) +
+  guides(color = guide_legend(override.aes = list(linewidth = 0.75
+                                                  ,alpha = 1)))
 
-p
 # save
 ggplot2::ggsave(plot = p,
                 filename = "figures/basic_sptrans.png",
@@ -114,66 +114,13 @@ ggplot2::ggsave(plot = p,
                 bg = "white",
                 height = 20,units = "cm",dpi = 300)
 
-
-  ## a) Temporal emissions ---------
-
-# import fonts
-# extrafont::font_import(paths = "C://Users//B138750230//Downloads//Latin-Modern-Roman-fontfacekit//web fonts/")
-
-# create folder
-rm(list=ls())
-gc(reset = TRUE)
-
-# list-files
-files_gps <- list.files(path = 'data/emi_time/',full.names = TRUE)
-files_gps_names <- list.files(path = 'data/emi_time/',full.names = FALSE)
-
-#  my function to_compartible_units-
-to_compartible_units <- function(i){  #i = my_time$CO2
-  pol_digits <- floor(log10(as.numeric(i))) + 1
-  if(median(pol_digits,na.rm = TRUE) <= 2){return(units::set_units(i,"g"))}
-  if(median(pol_digits,na.rm = TRUE) <= 5){return(units::set_units(i,"kg"))}
-  if(median(pol_digits,na.rm = TRUE) >= 6){return(units::set_units(i,"t"))}
-}
-
-tmp_my_time <- lapply(files_gps, readr::read_rds) %>% 
-  data.table::rbindlist(fill = TRUE)
-
-
-# total 
-tmp_my_time[,sum(emi),by = .(pollutant)]
-# aggregate by summing
-my_time <- tmp_my_time[,sum(emi),by = .(timestamp_hour,pollutant)]
-my_time <- my_time[pollutant == "PM10"]
-data.table::setkeyv(my_time,cols = c("pollutant","timestamp_hour"))
-my_time[,V2 := to_compartible_units(V1)]
-
-
-# plot time-
-
-ggplot(data = my_time) + 
-  geom_bar(aes(x = timestamp_hour, y = as.numeric(V2), fill = as.numeric(V2)),
-           stat = "identity")+
-  labs(title = NULL,
-       x = "Hour",
-       y = expression(PM[10][] (kg)))+
-  #y = paste0("PM10 (",getUnit_graphic,")")) + 
-  viridis::scale_fill_viridis(option = "D",direction = -1)+
-  theme_minimal()+
-  theme(legend.position = "none",
-        text = element_text(family = "LM Roman 10"))
-
-ggplot2::ggsave(filename = "figures/temporal_PM10.png",
-                scale = .55,bg = "white",
-                width = 18,height = 10,units = "cm",dpi = 300)
-
 ## b) Plot EF | MEF by age----------------
 rm(list=ls())
 gc(reset = TRUE)
 
 # list-files
-files_gps <- list.files(path = 'data/emi_age/',full.names = TRUE)
-files_gps_names <- list.files(path = 'data/emi_age/',full.names = FALSE)
+files_gps <- list.files(path = 'data/emi_age/jul/',full.names = TRUE)
+files_gps_names <- list.files(path = 'data/emi_age/jul/',full.names = FALSE)
 
 # read files
 tmp_my_age <- lapply(files_gps, readr::read_rds) %>% 
@@ -231,29 +178,6 @@ ggplot(data = tmp_my_age[pollutant != "CH4"]) +
 ggsave(filename = "figures/emissions_age.png"
        ,width = 36,height = 17.5,dpi = 300,units = "cm",scale = 0.5)
 
-## d) ef_age ----
-
-#ggplot(data = tmp_my_age) + 
-#  geom_bar(aes(y= as.numeric(mef),x = model_year_f ,fill = veh_type)
-#           ,stat = "identity",position = "dodge")+
-#  facet_wrap(~pollutant_f
-#             ,scales = "free"
-#             , label = "label_parsed") +
-#  labs(fill = NULL,x = "Year of fleet",y = "Marginal Emission Factors (g/km)")+
-#  scale_fill_manual(values = viridis::cividis(4))+
-#  scale_x_discrete(breaks = c(seq(2008,2019,3),2019),
-#                   labels = c(seq(2008,2019,3),2019))+
-#  theme_light()+
-#  scale_y_continuous(expand = expansion(mult = 0.05)) +
-#  theme(axis.text.x = element_text(size = 8)
-#        ,text = element_text(family = "LM Roman 10")
-#        ,strip.text = element_text(colour = 'black')
-#        ,legend.position = c(0.875,0.9))
-#
-## save
-#ggsave(filename = "article/data/plots/MEF_age.png"
-#       ,width = 36,height = 30,dpi = 300,units = "cm",scale = 0.5)
-
 ## e1) zoom emissions ----
 
 rm(list=ls())
@@ -270,8 +194,8 @@ ytile <- max(my_tile$y) - min(my_tile$y)
 ratio_tile <- ytile/xtile
 
 # list-files
-files_gps <- list.files(path = 'data/emi_grid/',full.names = TRUE)
-files_gps_names <- list.files(path = 'data/emi_grid/',full.names = FALSE)
+files_gps <- list.files(path = 'data/emi_grid/jul/',full.names = TRUE)
+files_gps_names <- list.files(path = 'data/emi_grid/jul/',full.names = FALSE)
 
 #  my function to_compartible_units-
 to_compartible_units <- function(i){  #i = my_time$CO2
@@ -355,12 +279,12 @@ lim_coord_zoom <- get_bbox %>%
 
 lim_coord_zoom
 
-lim_fill_pm10 <- bind_grid[bind_grid$pollutant == "PM10",] %>% 
+lim_fill_nox <- bind_grid[bind_grid$pollutant == "NOx",] %>% 
   data.table::setDT() %>% 
   .[,list(min(value),max(value))] %>% 
   as.numeric() %>% as.vector()
 
-lim_fill_pm10
+lim_fill_nox
 
 lim_fill_co2 <- bind_grid[bind_grid$pollutant == "CO2",] %>% 
   data.table::setDT() %>% 
@@ -368,7 +292,7 @@ lim_fill_co2 <- bind_grid[bind_grid$pollutant == "CO2",] %>%
   as.numeric() %>% as.vector()
 
 # gtfs
-spo_gtfs <- gtfstools::read_gtfs("data/gtfs_spo_sptrans_prep.zip")
+spo_gtfs <- gtfstools::read_gtfs("data/gtfs_spo_sptrans_prep_jul.zip")
 gps_lines_sf <- gtfstools::convert_shapes_to_sf(gtfs = spo_gtfs)
 stops_sf <- gtfstools::convert_stops_to_sf(gtfs = spo_gtfs)
 
@@ -382,7 +306,7 @@ rm(stops_sf)
 rm(spo_gtfs)
 
 ##### ggplot PM10 ----
-pm10_plot <-  ggplot(bind_grid[bind_grid$pollutant == "PM10",]) + 
+nox_plot <-  ggplot(bind_grid[bind_grid$pollutant == "NOx",]) + 
   # add raster
   geom_raster(data = my_tile, aes(x, y, fill = hex), alpha = 1) +
   coord_cartesian(xlim = xlim_coord, ylim = ylim_coord,expand = FALSE) +
@@ -413,8 +337,8 @@ pm10_plot <-  ggplot(bind_grid[bind_grid$pollutant == "PM10",]) +
   # labels and theme
   labs(title = NULL
        #, subtitle =  expression(PM[10][] emissions)
-       , subtitle =  expression(PM[10][])
-       , fill =  expression(PM[10][] (g))
+       , subtitle =  expression(NO[X][])
+       , fill =  expression(NO[X][] (g))
        , color = NULL
        , x = NULL
        , y = NULL) +
@@ -444,7 +368,7 @@ pm10_plot <-  ggplot(bind_grid[bind_grid$pollutant == "PM10",]) +
         legend.key.size = ggplot2::unit(0.03250,"npc"),
         legend.box.margin = margin(3,3,3,3, "pt")) 
 
-pm10_plot
+nox_plot
 #### ggplot CO2-------
 
 co2_plot <-  ggplot(bind_grid[bind_grid$pollutant == "CO2",]) + 
@@ -493,9 +417,9 @@ co2_plot <-  ggplot(bind_grid[bind_grid$pollutant == "CO2",]) +
         legend.box.margin = margin(3,3,3,3, "pt")) 
 
 co2_plot
-##### ggplot zoom pm10 -----
+##### ggplot zoom nox -----
 
-pm10_zoom <- ggplot(intersect_bound[intersect_bound$pollutant == "PM10",]) + 
+nox_zoom <- ggplot(intersect_bound[intersect_bound$pollutant == "NOx",]) + 
   # data
   geom_raster(data = my_tile, aes(x, y, fill = hex), alpha = 1) +
   scale_fill_identity() +
@@ -505,12 +429,12 @@ pm10_zoom <- ggplot(intersect_bound[intersect_bound$pollutant == "PM10",]) +
           , colour = "transparent")  +
   viridis::scale_fill_viridis(option = "D"
                               ,direction = -1
-                              , limits = lim_fill_pm10) +
+                              , limits = lim_fill_nox) +
   #viridis::scale_fill_viridis(option = "D"
   #                            ,direction = -1
   #                            ,labels = scales::number_format()
   #                            ,trans = "pseudo_log"
-  #                            , limits = lim_fill_pm10
+  #                            , limits = lim_fill_nox
   #) +
   geom_sf(data = intersect_lines_sf,alpha = 0.15,size = 0.25,color = "black")+
   # limits
@@ -546,7 +470,7 @@ pm10_zoom <- ggplot(intersect_bound[intersect_bound$pollutant == "PM10",]) +
                  st.bottom = FALSE, st.color = "black",
                  transform = FALSE, model = "WGS84")
 
-pm10_zoom
+nox_zoom
 
 ##### ggplot zoom co2 -----
 
@@ -591,11 +515,11 @@ co2_zoom <- ggplot(intersect_bound[intersect_bound$pollutant == "CO2",]) +
 
 #### patchwork ----
 
-pm10_plot_squared <- pm10_plot  +
+nox_plot_squared <- nox_plot  +
   ggnewscale::new_scale_color()+
   geom_sf(data = get_bbox,color = "red",fill = NA)
 
-pm10_final <- pm10_plot_squared / pm10_zoom
+nox_final <- nox_plot_squared / nox_zoom
 
 co2_plot_squared <- co2_plot  +
   ggnewscale::new_scale_color()+
@@ -604,12 +528,12 @@ co2_plot_squared <- co2_plot  +
 co2_final <- co2_plot_squared / co2_zoom
 
 
-final <- co2_final | pm10_final
+final <- co2_final | nox_final
 
 #final
 
 ggplot2::ggsave(plot = final
-                , filename = "figures/spatial_co2_pm10_v1_linear.png"
+                , filename = "figures/spatial_co2_nox_linear.png"
                 , scale = 0.7
                 , width = 17
                 , bg = "white"
@@ -640,7 +564,7 @@ ytile <- max(my_tile$y) - min(my_tile$y)
 ratio_tile <- ytile/xtile
 
 # list-files
-files_gps <- list.files(path = 'data/emi_grid_time/',full.names = TRUE)
+files_gps <- list.files(path = 'data/emi_grid_time/oct/',full.names = TRUE)
 
 # read files
 tmp_my_grid <- lapply(files_gps, readr::read_rds) %>% 
@@ -672,7 +596,7 @@ my_grid <- sf::st_as_sf(my_grid) %>% sf::st_transform(3857)
 
 
 # plot
-getUnit_map <- c("t","g") # CO2, PM10
+getUnit_map <- c("t","g") # CO2, nox
 
 map_scale <- as.numeric(sf::st_bbox(my_grid)[3]) -  
   as.numeric(sf::st_bbox(my_grid)[1])
@@ -691,7 +615,7 @@ bind_grid <- data.table::melt(data = my_grid
 
 pol_limit <- bind_grid
 pol_limit <- data.table::setDT(pol_limit) %>% 
-  .[pollutant == "PM10",] %>% 
+  .[pollutant == "NOx",] %>% 
   .[,list(min(value),max(value))] %>% 
   as.numeric() 
 pol_limit 
@@ -716,7 +640,7 @@ bind_grid$horario_f <- factor(
 
 
 
-plot_hour_pm10 <- ggplot(bind_grid[bind_grid$pollutant == "PM10",]) + 
+plot_hour_nox <- ggplot(bind_grid[bind_grid$pollutant == "NOx",]) + 
   # add raster
   geom_raster(data = my_tile, aes(x, y, fill = hex), alpha = 1) +
   coord_cartesian(xlim = xlim_coord, ylim = ylim_coord,expand = FALSE) +
@@ -743,7 +667,7 @@ plot_hour_pm10 <- ggplot(bind_grid[bind_grid$pollutant == "PM10",]) +
   labs(title = NULL
        #, subtitle =  expression(PM[10][] emissions)
        #, subtitle =  expression(PM[10][])
-       , fill =  expression(PM[10][] (g))
+       , fill =  expression(NO[X][] (g))
        , color = NULL
        , x = NULL
        , y = NULL) +
@@ -755,10 +679,10 @@ plot_hour_pm10 <- ggplot(bind_grid[bind_grid$pollutant == "PM10",]) +
         legend.box.margin = margin(3,3,3,3, "pt")
         ,plot.margin = unit(c(0,0,0.35,0),"cm")) 
 
-plot_hour_pm10
+plot_hour_nox
 
-ggplot2::ggsave(plot = plot_hour_pm10
-                , filename = "figures/spatial_hour_pm10_linear_3periods.png"
+ggplot2::ggsave(plot = plot_hour_nox
+                , filename = "figures/spatial_hour_nox_linear_3periods.png"
                 , scale = 0.7
                 , width = 21
                 , bg = "white"
