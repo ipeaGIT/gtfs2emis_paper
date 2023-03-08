@@ -219,7 +219,7 @@ ggplot(data = my_time) +
            stat = "identity")+
   labs(title = NULL,
        x = "Hour",
-       y = expression(NO[X][] (kg)))+
+       y = expression(NO[X][] (t)))+
   #y = paste0("PM10 (",getUnit_graphic,")")) + 
   viridis::scale_fill_viridis(option = "D",direction = -1)+
   theme_minimal()+
