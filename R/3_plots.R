@@ -178,6 +178,57 @@ ggplot(data = tmp_my_age[pollutant != "CH4"]) +
 ggsave(filename = "figures/emissions_age.png"
        ,width = 36,height = 17.5,dpi = 300,units = "cm",scale = 0.5)
 
+## d) Temporal emissions ---------
+
+# import fonts
+# extrafont::font_import(paths = "C://Users//B138750230//Downloads//Latin-Modern-Roman-fontfacekit//web fonts/")
+
+# create folder
+rm(list=ls())
+gc(reset = TRUE)
+
+# list-files
+files_gps <- list.files(path = 'data/emi_time/jul/',full.names = TRUE)
+files_gps_names <- list.files(path = 'data/emi_time/jul/',full.names = FALSE)
+
+#  my function to_compartible_units-
+to_compartible_units <- function(i){  #i = my_time$CO2
+  pol_digits <- floor(log10(as.numeric(i))) + 1
+  if(median(pol_digits,na.rm = TRUE) <= 2){return(units::set_units(i,"g"))}
+  if(median(pol_digits,na.rm = TRUE) <= 5){return(units::set_units(i,"kg"))}
+  if(median(pol_digits,na.rm = TRUE) >= 6){return(units::set_units(i,"t"))}
+}
+
+tmp_my_time <- lapply(files_gps, readr::read_rds) %>% 
+  data.table::rbindlist(fill = TRUE)
+
+
+# total 
+tmp_my_time[,sum(emi),by = .(pollutant)]
+# aggregate by summing
+my_time <- tmp_my_time[,sum(emi),by = .(timestamp_hour,pollutant)]
+my_time <- my_time[pollutant == "NOx"]
+data.table::setkeyv(my_time,cols = c("pollutant","timestamp_hour"))
+my_time[,V2 := to_compartible_units(V1)]
+
+
+# plot time-
+
+ggplot(data = my_time) + 
+  geom_bar(aes(x = timestamp_hour, y = as.numeric(V2), fill = as.numeric(V2)),
+           stat = "identity")+
+  labs(title = NULL,
+       x = "Hour",
+       y = expression(NO[X][] (kg)))+
+  #y = paste0("PM10 (",getUnit_graphic,")")) + 
+  viridis::scale_fill_viridis(option = "D",direction = -1)+
+  theme_minimal()+
+  theme(legend.position = "none",
+        text = element_text(family = "LM Roman 10"))
+
+ggplot2::ggsave(filename = "figures/temporal_NOx.png",
+                scale = .55,bg = "white",
+                width = 18,height = 10,units = "cm",dpi = 300)
 ## e1) zoom emissions ----
 
 rm(list=ls())
