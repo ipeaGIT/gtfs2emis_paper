@@ -1,6 +1,8 @@
-[![DOI](https://zenodo.org/badge/563972827.svg)](https://zenodo.org/badge/latestdoi/563972827)
+R codes used in the research paper: <img align="right" src="featured_trpd_cover.jpg" alt="logo" width="180">
 
-R codes used in the research paper **"Estimating public transport emissions from General Transit Feed Specification data"**
+- Vieira, J. P. B., Pereira, R. H. M., & Andrade, P. R. (2023). *Estimating public transport emissions from General Transit Feed Specification data*. **Transportation Research Part D: Transport and Environment**, 119, 103757. [https://doi.org/10.1016/j.trd.2023.103757](https://doi.org/10.1016/j.trd.2023.103757)
+
+
 
 The R scripts to reproduce the results are divided into six steps:
 
